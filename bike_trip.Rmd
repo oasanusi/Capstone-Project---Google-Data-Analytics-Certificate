@@ -1,0 +1,334 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+############################################################
+#### Capstone Project - Google Data Analytics Certificate submission
+#### Data Scientist - Ola Sanusi, PhD
+#### Date - September 2021
+#############################################################
+
+## Introduction
+In an effort to maximize the number of annual membership, Cyclistic bikes want to understand the difference between casual riders and riders with annual membership. The goal is to use every skills I learned about Data Analytics and historical bike trip data to understand how to convert casual riders into annual members by understanding how annual members and casual members differ, why casual riders would buy a membership and how to use digital media to attract more customers.
+
+## Problem Statement
+Cyclistics bikes believes that maximizing the number of their annual members is very important for the company's future growth because annual members are more profitable than casual riders. Cyclistics want to understand how casual riders differ from annual members and use this findings to effectively design appropriate marketing strategy to help convert casual riders into annual members.
+
+## Bike Trip Data
+The bike trip data used in this case study was downloaded from [divy tripdata S3 bucket](https://divvy-tripdata.s3.amazonaws.com/index.html) which houses historical trip data for several years. Twelve (12) months of data  covering September 2020 to August 2021 were downloaded into a folder. The zipped files (178 MB) were unzipped and each file renamed YYYYMM_bike_trips.csv (870 MB). Microsoft (MS) Excel was used for initial data preprocessing. Each file was opened and additional features (ride_length, day_of_week) created. The Start_at and Ended_at columns were formatted as Time in the format MM/DD/YY H:MM PM (3/14/01 1:30 PM) while the ride_length column formated as Time in the format HH:MM:SS (37:30:55). Each preprocessed file was saved as an Excel workbook in a subfolder.
+
+## Data Wrangling and Visualization
+Subsequent data wrangling and cleaning of each of the 12 Excel workbook file was completed using R.
+
+```{r}
+#load all required libraries
+library(tidyverse) # to wrangle data
+library(lubridate) # to wrangle date
+library(janitor)
+library(openxlsx)  # to work with excel worksheet
+library(readxl)    # to read excel files
+
+```
+
+#### STEP 1 - Combine Files into a Single File
+```{r}
+# The 12 excel worksheet were merged into a single excel workbook
+path <- "C:/Users/lanre/Desktop/R/Bike Data/processed_datasets"
+merge_file_name <- "C:/Users/lanre/Desktop/R/Bike Data/processed_datasets//merged_file.xlsx"
+
+filenames_list <- list.files(path= path, full.names=TRUE)
+
+All <- lapply(filenames_list,function(filename){
+  print(paste("Merging",filename,sep = " "))
+  read.xlsx(filename)
+})
+
+df <- do.call(rbind.data.frame, All)
+write.xlsx(df,merge_file_name)
+
+```
+
+### STEP 2 - Data Wrangling and Cleaning
+```{r}
+# load the single excel file as a data.frame
+
+# specify the path of the merged xlsx file
+path <- "C:/Users/lanre/Desktop/R/Bike Data/processed_datasets/merged_file.xlsx"
+
+# Import the XLSX file
+df <- read_excel(path)
+
+# print the few rows of the file
+head(df)
+```
+
+
+```{r}
+#exploringg the data.frame
+colnames(df)
+dim((df))
+```
+
+The dataframe contains 4.9 million rows and 15 columns which took approximately 1 hour to fully load into R data.frame
+
+
+```{r}
+# rename some columns in the dataframe
+df <- rename (df,
+               trip_id = ride_id,
+              bikeid = rideable_type,
+              start_time =  started_at,
+              end_time = ended_at,
+              from_station_name = start_station_name,
+              from_station_id = start_station_id,
+              to_station_name = end_station_name,
+              to_station_id = end_station_id,
+              usertype = member_casual)
+
+```
+
+```{r}
+# remove unneeded columns
+df <- df %>%  
+  select(-c(from_station_id, to_station_id, start_lat, start_lng, end_lat, end_lng))
+
+```
+
+
+```{r}
+# convert the date numeric in the start_time and end_time columns to datetime
+df <- mutate(df,
+             start_time = excel_numeric_to_date(start_time, include_time =TRUE),
+             end_time = excel_numeric_to_date(end_time, include_time = TRUE))
+
+```
+
+```{r}
+# Calculate the time difference between the start_time and end_time 
+df$ride_length <- difftime(df$end_time,df$start_time)
+
+# substract start time from end time and use seconds to period function to  #convert time difference to hms
+df$ride_length_hms = seconds_to_period(df$end_time - df$start_time)
+
+
+```
+
+```{r}
+# Check statistical summary of the dataframe
+summary(df)
+
+```
+From the statistical summary, it seems that there are outliers in the ride_length column because the minimum ride length has negative values and the maximum value is more than 38d 20H 24M 9s
+
+### STEP 3 - Further Data Cleaning
+
+```{r}
+# Remove bad entries when bike are checked for quality(start_station_name == "HQQR") and ride_length length value is either negative or too high
+# The dataframe includes a few hundred entries when bikes were taken out of docks and checked for quality by Divvy or ride_length was negative/higher than 30hours
+# We will create a new version of the dataframe (df2) since data is being removed
+
+df2 <- df[!(df$from_station_name == "HQ QR" | df$ride_length_hms< "0s" | df$ride_length_hms > "30H"),]
+
+```
+
+```{r}
+# Remove missing values from ride length and day of week columns
+df2 <- df2 %>% 
+  drop_na(ride_length, ride_length_hms, day_of_week)
+
+```
+
+```{r}
+# recode the usertype column from 4 categories label to 2 categories (member and casual)
+df2 <-  df2 %>% 
+  mutate(usertype = recode(usertype,
+                                "Subscriber" = "member",
+                                "Customer" = "casual"))
+```
+
+
+```{r}
+#recode the day of the week variable
+df2 <-  df2 %>% 
+  mutate(day_of_week = recode(day_of_week,
+                           "1" = "Sunday",
+                           "2" = "Monday",
+                           "3" = "Tuesday",
+                           "4" = "Wednesday",
+                           "5" = "Thursday",
+                           "6" = "Friday",
+                           "7" = "Saturday"))
+
+
+# Fix the order of the day of th week column.
+df2$day_of_week <- ordered(df2$day_of_week, levels=c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
+
+
+```
+
+```{r}
+head(df2)
+```
+
+
+
+
+```{r}
+# briefly explore data
+# Check the number of observations
+print("The distribution of usertype are:")
+table(df2$usertype)
+
+print("The distribution of bikeid are")
+table(df2$bikeid)
+```
+
+### STEP 4 - Descriptive Statistics and EDA
+```{r}
+# Descriptive analysis on ride_length (all figures in seconds)
+mean(df2$ride_length) #straight average (total ride length / rides)
+median(df2$ride_length) #midpoint number in the ascending array of ride lengths
+max(df2$ride_length) #longest ride in sec
+min(df2$ride_length) #shortest ride in sec
+
+
+```
+```{r}
+ggplot(data = df2, mapping = aes(x = ride_length)) +
+geom_freqpoly(mapping = aes(color = usertype), binwidth = 500)
+
+```
+
+```{r}
+ggplot(df2) +
+  geom_bar(mapping = aes(x = usertype))
+```
+```{r}
+# Distribution of the usertypes
+a=table(df2$usertype)
+pct=round(a/sum(a)*100)
+lbs=paste(c("casual","member")," ",pct,"%",sep=" ")
+library(plotrix)
+pie3D(a,labels=lbs, main="Pie Chart Depicting Ratio of Usertypes")
+```
+
+
+```{r}
+ggplot(df2) +
+geom_bar(mapping = aes(x = bikeid))
+```
+```{r}
+# Create the function.
+getmode <- function(v) {
+   uniqv <- unique(v)
+   uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+# Calculate the mode using the user function.
+result <- getmode(df2$day_of_week)
+print("The mode of the day of the week:")
+print(result)
+
+```
+
+
+
+```{r}
+ggplot(df2) +
+geom_bar(mapping = aes(x = day_of_week))
+```
+```{r}
+# Statistical summary of the dataframe
+summary(df2)
+```
+The Data has 4.45 million rows of bike trip data with the minimum ride length of 0s and maximum length of 1d 5H 58m
+
+```{r}
+# Compare usertype
+# Compare members and casual users
+aggregate(df2$ride_length ~ df2$usertype, FUN = mean)
+aggregate(df2$ride_length ~ df2$usertype, FUN = median)
+aggregate(df2$ride_length ~ df2$usertype, FUN = max)
+aggregate(df2$ride_length ~ df2$usertype, FUN = min)
+
+
+```
+```{r}
+# Now, let's run the average ride time by each day for members vs casual users
+aggregate(df2$ride_length ~ df2$usertype + df2$day_of_week, FUN = mean)
+```
+```{r}
+# analyze ridership data by type and weekday
+df2 %>% 
+  mutate(weekday = wday(start_time, label = TRUE)) %>%  #creates weekday field using wday()
+  group_by(usertype, weekday) %>%  #groups by usertype and weekday
+  summarise(number_of_rides = n()							#calculates the number of rides and average duration 
+            ,average_duration = mean(ride_length)) %>% 		# calculates the average duration
+  arrange(usertype, weekday)	
+
+```
+
+```{r}
+# Let's visualize the number of rides by rider type
+df2 %>% 
+  mutate(weekday = wday(start_time, label = TRUE)) %>% 
+  group_by(usertype, weekday) %>% 
+  summarise(number_of_rides = n()
+            ,average_duration = mean(ride_length)) %>% 
+  arrange(usertype, weekday)  %>% 
+  ggplot(aes(x = weekday, y = number_of_rides, fill = usertype)) +
+  geom_col(position = "dodge")
+
+```
+```{r}
+# Let's visualize the number of rides by rider type
+df2 %>% 
+  group_by(usertype, bikeid) %>% 
+  summarise(number_of_rides = n()
+            ,average_duration = mean(ride_length)) %>% 
+  arrange(usertype, bikeid)  %>% 
+  ggplot(aes(x = bikeid, y = number_of_rides, fill = usertype)) +
+  geom_col(position = "dodge")
+```
+```{r}
+# Let's create a visualization for average duration
+df2 %>% 
+  mutate(weekday = wday(start_time, label = TRUE)) %>% 
+  group_by(usertype, weekday) %>% 
+  summarise(number_of_rides = n()
+            ,average_duration = mean(ride_length)) %>% 
+  arrange(usertype, weekday)  %>% 
+  ggplot(aes(x = weekday, y = average_duration, fill = usertype)) +
+  geom_col(position = "dodge")
+```
+```{r}
+# Let's create a visualization for average duration
+df2 %>% 
+  group_by(usertype, bikeid) %>% 
+  summarise(number_of_rides = n()
+            ,average_duration = mean(ride_length)) %>% 
+  arrange(usertype, bikeid)  %>% 
+  ggplot(aes(x = bikeid, y = average_duration, fill = usertype)) +
+  geom_col(position = "dodge")
+```
+
+### STEP 5 - Save cleaned dataframe for futher analysis
+```{r}
+csv_path <- "C:/Users/lanre/Desktop/R/Bike Data/processed_datasets/bike_trips_cleaned.csv"
+
+ write.csv(df2, file = csv_path)
+ 
+
+```
+
+## Conclusion and Recommendations
+Analyzing 12 months of Cyclistics bike trip data reveals that there are more annual riders (55%) that casual riders (45%). Majority of bike rides occurs during the weekends, with casual riders using bikes more during weekends while annual members used bike mostly during the weekdays. 
+
+Casual riders usually spend longer time using the bikes than annual members although annual members take a higher number of rides during the weekday. Both user type predominantly use the classic bikes with annual member using higher proportion than casual riders. Irrespective of the bike type used, annual member tend to spend roughly the same amount of time on the bikes but casual members spend more time using the docked bikes. 
+
+Based on the insights from this brief exploratory analysis, I would recommend the following:
+
+1. Cyclistics should provide more classic bikes because of its high demand
+2. Provide casual riders with insentives to encourage them to upgrade to the annual membership because they spend longer time using the bikes throughout the week.
+3. Increase the number of bikes available for users during the weekend because more trips are expected during that period.
+
+Check out full code and R notebook on github.
