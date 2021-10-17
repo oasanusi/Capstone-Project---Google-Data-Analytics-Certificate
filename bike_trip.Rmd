@@ -331,4 +331,4 @@ Based on the insights from this brief exploratory analysis, I would recommend th
 2. Provide casual riders with insentives to encourage them to upgrade to the annual membership because they spend longer time using the bikes throughout the week.
 3. Increase the number of bikes available for users during the weekend because more trips are expected during that period.
 
-Check out full code and R notebook on github.
+
